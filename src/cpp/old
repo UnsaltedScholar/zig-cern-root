@@ -1,0 +1,41 @@
+#include <iostream>
+#include <Math/Vector4D.h>
+#include <Math/Boost.h>
+
+
+int main() {
+    // Define a convenient alias for a 4-vector in Cartesian coordinates (px, py, pz, E)
+    using LV = ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>>;
+
+    // Create two Lorentz vectors
+    LV v1(1.0, 2.0, 3.0, 4.0);                  // px=1, py=2, pz=3, E=4
+    LV v2;                                     
+    v2.SetPxPyPzE(0.5, 1.5, 2.5, 3.5);         // alternative setter
+
+    // Print basic properties
+    std::cout << "v1 = " << v1 << std::endl;
+    std::cout << "v2 = " << v2 << std::endl;
+    std::cout << "|v1| (mass) = " << v1.M() << std::endl;
+    std::cout << "|v2| (mass) = " << v2.M() << std::endl;
+    std::cout << "v1.Pt() = " << v1.Pt() << std::endl;
+    std::cout << "v1.Eta() = " << v1.Eta() << std::endl;
+    std::cout << "v1.Phi() = " << v1.Phi() << std::endl;
+
+    // Vector operations
+    LV sum = v1 + v2;
+    LV diff = v1 - v2;
+    double dot   = v1.Dot(v2);
+
+    std::cout << "v1 + v2 = " << sum << std::endl;
+    std::cout << "v1 - v2 = " << diff << std::endl;
+    std::cout << "v1 . v2 (Minkowski dot) = " << dot << std::endl;
+    std::cout << "Invariant mass of (v1+v2): " << sum.M() << std::endl;
+
+    // Boost v1 into the rest frame of v2 using ROOT::Math::Boost
+    ROOT::Math::Boost boost(-v2.BoostToCM());
+    LV v1_boosted = boost(v1);
+
+    std::cout << "v1 boosted to v2 rest frame = " << v1_boosted << std::endl;
+
+    return 0;
+}
