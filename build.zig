@@ -10,7 +10,7 @@ const CSourceLanguage = Module.CSourceLanguage;
 
 const zcc = @import("compile_commands");
 
-const additional_flags: []const []const u8 = &.{ "-std=c++17", "-pthread", "-m64", "-stdlib=libstdc++", "-rdynamic" };
+const additional_flags: []const []const u8 = &.{ "-std=c++17", "-pthread", "-m64" }; //, "-stdlib=libstdc++", "-rdynamic" };
 const debug_flags = runtime_check_flags ++ warning_flags;
 
 pub fn build(b: *std.Build) void {
@@ -52,8 +52,14 @@ pub fn build(b: *std.Build) void {
     {
         exe.addCSourceFiles(exe_files);
         // exe.linkLibCpp(); // May need to change this to linkLibC() for your project
-        exe.linkSystemLibrary("stdc++");
+        // exe.linkSystemLibrary("stdc++");
+        exe.linkSystemLibrary("c++");
         exe.addIncludePath(b.path("include"));
+        // exe.addIncludePath(b.path("include/bits"));
+        exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/" });
+        exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/bits/" });
+        exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/x86_64-pc-linux-gnu/" });
+        exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/x86_64-pc-linux-gnu/bits/" });
         // exe.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/ROOT/RDF/"});
         // exe.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/ROOT/"});
         // exe.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/Math/"});
@@ -66,8 +72,14 @@ pub fn build(b: *std.Build) void {
         debug.addCSourceFiles(debug_files);
 
         // debug.linkLibCpp(); // May need to change this to linkLibC() for your project
-        debug.linkSystemLibrary("stdc++");
+        // debug.linkSystemLibrary("stdc++");
+        debug.linkSystemLibrary("c++");
         debug.addIncludePath(b.path("include"));
+        // debug.addIncludePath(b.path("include/bits"));
+        debug.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/" });
+        debug.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/bits/" });
+        debug.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/x86_64-pc-linux-gnu/" });
+        debug.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/x86_64-pc-linux-gnu/bits/" });
         // debug.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/ROOT/RDF/"});
         // debug.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/ROOT/"});
         // debug.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/Math/"});
@@ -125,7 +137,6 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary("pthread");
         exe.linkSystemLibrary("m");
         exe.linkSystemLibrary("dl");
-        exe.linkSystemLibrary("gcc_s");
         exe.linkSystemLibrary("ASImageGui");
         exe.linkSystemLibrary("ASImage");
         exe.linkSystemLibrary("Cling");
@@ -300,7 +311,6 @@ pub fn build(b: *std.Build) void {
         debug.linkSystemLibrary("pthread");
         debug.linkSystemLibrary("m");
         debug.linkSystemLibrary("dl");
-        debug.linkSystemLibrary("gcc_s");
         debug.linkSystemLibrary("ASImageGui");
         debug.linkSystemLibrary("ASImage");
         debug.linkSystemLibrary("Cling");
