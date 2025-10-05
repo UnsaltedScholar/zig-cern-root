@@ -1,5 +1,6 @@
 const std = @import("std");
-const ArrayList = std.ArrayListUnmanaged;
+const builtin = std.builtin;
+const ArrayList = std.ArrayList;
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const FixedBufferAllocator = std.heap.FixedBufferAllocator;
@@ -10,7 +11,7 @@ const CSourceLanguage = Module.CSourceLanguage;
 
 const zcc = @import("compile_commands");
 
-const additional_flags: []const []const u8 = &.{ "-std=c++17", "-pthread", "-m64" }; //, "-stdlib=libstdc++", "-rdynamic" };
+const additional_flags: []const []const u8 = &.{ "-pthread", "-std=c++20", "-m64", "-rdynamic" };
 const debug_flags = runtime_check_flags ++ warning_flags;
 
 pub fn build(b: *std.Build) void {
@@ -18,17 +19,27 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "zig-compiled",
+    const exe_mod = b.addModule("exe", .{
         .target = target,
         .optimize = optimize,
+        .link_libcpp = true, // May need to change this to linkLibC() for your project
     });
 
+    const exe = b.addExecutable(.{
+        .name = "zig-compiled",
+        .root_module = exe_mod,
+    });
+
+    const debug_mod = b.addModule("debug", .{
+        .target = target,
+        .optimize = optimize,
+        .link_libcpp = true, // May need to change this to linkLibC() for your project
+    });
     // Does not link asan or use build flags other than "std="
     const debug = b.addExecutable(.{
         .name = "debug",
-        .target = target,
-        .optimize = optimize,
+        .root_module = debug_mod,
+        .use_llvm = true,
     });
 
     const exe_flags = getBuildFlags(
@@ -51,18 +62,7 @@ pub fn build(b: *std.Build) void {
     // Setup exe executable
     {
         exe.addCSourceFiles(exe_files);
-        // exe.linkLibCpp(); // May need to change this to linkLibC() for your project
-        // exe.linkSystemLibrary("stdc++");
-        exe.linkSystemLibrary("c++");
         exe.addIncludePath(b.path("include"));
-        // exe.addIncludePath(b.path("include/bits"));
-        exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/" });
-        exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/bits/" });
-        exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/x86_64-pc-linux-gnu/" });
-        exe.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/x86_64-pc-linux-gnu/bits/" });
-        // exe.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/ROOT/RDF/"});
-        // exe.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/ROOT/"});
-        // exe.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/Math/"});
     }
 
     // Setup debug executable
@@ -70,406 +70,94 @@ pub fn build(b: *std.Build) void {
         var debug_files = exe_files;
         debug_files.flags = additional_flags;
         debug.addCSourceFiles(debug_files);
-
-        // debug.linkLibCpp(); // May need to change this to linkLibC() for your project
-        // debug.linkSystemLibrary("stdc++");
-        debug.linkSystemLibrary("c++");
         debug.addIncludePath(b.path("include"));
-        // debug.addIncludePath(b.path("include/bits"));
-        debug.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/" });
-        debug.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/bits/" });
-        debug.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/x86_64-pc-linux-gnu/" });
-        debug.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/usr/include/c++/15.1.1/x86_64-pc-linux-gnu/bits/" });
-        // debug.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/ROOT/RDF/"});
-        // debug.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/ROOT/"});
-        // debug.addIncludePath(std.Build.LazyPath{.cwd_relative = "/usr/include/Math/"});
     }
 
     // Build and Link zig -> c code -------------------------------------------
-    // const zig_lib = b.addStaticLibrary(.{
+    // const zig_lib = b.addLibrary(.{
     //     .name = "mathtest",
-    //     .root_source_file = b.path("src/zig/mathtest.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
+    //     .root_module = b.createModule(.{
+    //         .root_source_file = b.path("src/zig/mathtest.zig"),
+    //         .target = target,
+    //         .optimize = optimize,
+    //     }),
+    //     .linkage = .static,
     // });
     // zig_lib.linkLibC();
     // zig_lib.addIncludePath(b.path("include/"));
-    // exe.linkLibrary(zig_lib);
-    // debug.linkLibrary(zig_lib);
+    // exe.root_module.linkLibrary(zig_lib);
+    // debug.root_module.linkLibrary(zig_lib);
     //-------------------------------------------------------------------------
 
     // Build and/or Link Dynamic library --------------------------------------
     const dynamic_option = b.option(bool, "build-dynamic", "builds the static.a file") orelse false;
     if (dynamic_option) {
-        // const dynamic_lib = createDynamicLib(b, optimize, target);
-        // exe.linkLibrary(dynamic_lib);
-        // debug.linkLibrary(dynamic_lib);
-        // b.installArtifact(dynamic_lib);
+        const dynamic_lib = createCLib(b, .{
+            .name = "example_dynamic",
+            .dir_path = "lib/example-dynamic-lib/",
+            .optimize = optimize,
+            .target = target,
+
+            .language = .cpp,
+            .linkage = .dynamic,
+        });
+        exe.root_module.linkLibrary(dynamic_lib);
+        debug.root_module.linkLibrary(dynamic_lib);
+        b.installArtifact(dynamic_lib);
     } else {
-        exe.addLibraryPath(std.Build.LazyPath{ .cwd_relative = "/usr/lib/root/" });
-        exe.addLibraryPath(std.Build.LazyPath{ .cwd_relative = "/usr/lib/clang/" });
-        // exe.linkSystemLibrary("Core");
-        // exe.linkSystemLibrary("Imt");
-        // exe.linkSystemLibrary("RIO");
-        // exe.linkSystemLibrary("Net");
-        // exe.linkSystemLibrary("Hist");
-        // exe.linkSystemLibrary("Graf");
-        // exe.linkSystemLibrary("Graf3d");
-        // exe.linkSystemLibrary("Gpad");
-        // exe.linkSystemLibrary("ROOTVecOps");
-        // exe.linkSystemLibrary("Tree");
-        // exe.linkSystemLibrary("TreePlayer");
-        // exe.linkSystemLibrary("Rint");
-        // exe.linkSystemLibrary("Postscript");
-        // exe.linkSystemLibrary("Matrix");
-        // exe.linkSystemLibrary("Physics");
-        // exe.linkSystemLibrary("MathCore");
-        // exe.linkSystemLibrary("Thread");
-        // exe.linkSystemLibrary("ROOTNTuple");
-        // exe.linkSystemLibrary("MultiProc");
-        // exe.linkSystemLibrary("ROOTDataFrame");
-        // exe.linkSystemLibrary("ROOTNTupleUtil");
-        // exe.linkSystemLibrary("Minuit2");
-        // exe.linkSystemLibrary("GenVector");
-        exe.linkSystemLibrary("LLVM");
-        exe.linkSystemLibrary("unwind");
-        exe.linkSystemLibrary("Cling");
-        exe.linkSystemLibrary("pthread");
-        exe.linkSystemLibrary("m");
-        exe.linkSystemLibrary("dl");
-        exe.linkSystemLibrary("ASImageGui");
-        exe.linkSystemLibrary("ASImage");
-        exe.linkSystemLibrary("Cling");
-        exe.linkSystemLibrary("complexDict");
-        exe.linkSystemLibrary("Core");
-        exe.linkSystemLibrary("cppyy_backend");
-        exe.linkSystemLibrary("cppyy");
-        exe.linkSystemLibrary("dequeDict");
-        exe.linkSystemLibrary("EGPythia8");
-        exe.linkSystemLibrary("EG");
-        exe.linkSystemLibrary("Eve");
-        exe.linkSystemLibrary("FFTW");
-        exe.linkSystemLibrary("FitPanel");
-        exe.linkSystemLibrary("FITSIO");
-        exe.linkSystemLibrary("Foam");
-        exe.linkSystemLibrary("forward_listDict");
-        exe.linkSystemLibrary("Fumili");
-        exe.linkSystemLibrary("Gdml");
-        exe.linkSystemLibrary("Ged");
-        exe.linkSystemLibrary("Genetic");
-        exe.linkSystemLibrary("GenVector");
-        exe.linkSystemLibrary("GeomPainter");
-        exe.linkSystemLibrary("Geom");
-        exe.linkSystemLibrary("Gpad");
-        exe.linkSystemLibrary("Graf3d");
-        exe.linkSystemLibrary("Graf");
-        exe.linkSystemLibrary("GuiBld");
-        exe.linkSystemLibrary("GuiHtml");
-        exe.linkSystemLibrary("Gui");
-        exe.linkSystemLibrary("Gviz3d");
-        exe.linkSystemLibrary("Gviz");
-        exe.linkSystemLibrary("GX11");
-        exe.linkSystemLibrary("GX11TTF");
-        exe.linkSystemLibrary("Hbook");
-        exe.linkSystemLibrary("HistFactory");
-        exe.linkSystemLibrary("HistPainter");
-        exe.linkSystemLibrary("Hist");
-        exe.linkSystemLibrary("Imt");
-        exe.linkSystemLibrary("listDict");
-        exe.linkSystemLibrary("map2Dict");
-        exe.linkSystemLibrary("mapDict");
-        exe.linkSystemLibrary("MathCore");
-        exe.linkSystemLibrary("MathMore");
-        exe.linkSystemLibrary("Matrix");
-        exe.linkSystemLibrary("Minuit2");
-        exe.linkSystemLibrary("Minuit");
-        exe.linkSystemLibrary("MLP");
-        exe.linkSystemLibrary("multimap2Dict");
-        exe.linkSystemLibrary("multimapDict");
-        exe.linkSystemLibrary("MultiProc");
-        exe.linkSystemLibrary("multisetDict");
-        exe.linkSystemLibrary("Net");
-        exe.linkSystemLibrary("NetxNG");
-        exe.linkSystemLibrary("New");
-        exe.linkSystemLibrary("PgSQL");
-        exe.linkSystemLibrary("Physics");
-        exe.linkSystemLibrary("Postscript");
-        exe.linkSystemLibrary("PyMVA");
-        exe.linkSystemLibrary("Quadp");
-        exe.linkSystemLibrary("RCsg");
-        exe.linkSystemLibrary("Recorder");
-        exe.linkSystemLibrary("RGL");
-        exe.linkSystemLibrary("RHTTPSniff");
-        exe.linkSystemLibrary("RHTTP");
-        exe.linkSystemLibrary("Rint");
-        exe.linkSystemLibrary("RIO");
-        exe.linkSystemLibrary("RMPI");
-        exe.linkSystemLibrary("RMySQL");
-        exe.linkSystemLibrary("RODBC");
-        exe.linkSystemLibrary("RooBatchCompute_AVX2");
-        exe.linkSystemLibrary("RooBatchCompute_AVX512");
-        exe.linkSystemLibrary("RooBatchCompute_AVX");
-        exe.linkSystemLibrary("RooBatchCompute_CUDA");
-        exe.linkSystemLibrary("RooBatchCompute_GENERIC");
-        exe.linkSystemLibrary("RooBatchCompute");
-        exe.linkSystemLibrary("RooBatchCompute_SSE4.1");
-        exe.linkSystemLibrary("RooFitCodegen");
-        exe.linkSystemLibrary("RooFitCore");
-        exe.linkSystemLibrary("RooFitHS3");
-        exe.linkSystemLibrary("RooFitJSONInterface");
-        exe.linkSystemLibrary("RooFitMore");
-        exe.linkSystemLibrary("RooFit");
-        exe.linkSystemLibrary("RooFitXRooFit");
-        exe.linkSystemLibrary("RooStats");
-        exe.linkSystemLibrary("RootAuth");
-        exe.linkSystemLibrary("ROOTBranchBrowseProvider");
-        exe.linkSystemLibrary("ROOTBrowsable");
-        exe.linkSystemLibrary("ROOTBrowserGeomWidget");
-        exe.linkSystemLibrary("ROOTBrowserRCanvasWidget");
-        exe.linkSystemLibrary("ROOTBrowserTCanvasWidget");
-        exe.linkSystemLibrary("ROOTBrowserTreeWidget");
-        exe.linkSystemLibrary("ROOTBrowserv7");
-        exe.linkSystemLibrary("ROOTBrowserWidgets");
-        exe.linkSystemLibrary("ROOTCanvasPainter");
-        exe.linkSystemLibrary("ROOTDataFrame");
-        exe.linkSystemLibrary("ROOTEve");
-        exe.linkSystemLibrary("ROOTFitPanelv7");
-        exe.linkSystemLibrary("ROOTGeoBrowseProvider");
-        exe.linkSystemLibrary("ROOTGeomViewer");
-        exe.linkSystemLibrary("ROOTGpadv7");
-        exe.linkSystemLibrary("ROOTGraphicsPrimitives");
-        exe.linkSystemLibrary("ROOTLeafDraw6Provider");
-        exe.linkSystemLibrary("ROOTLeafDraw7Provider");
-        exe.linkSystemLibrary("ROOTNTupleBrowseProvider");
-        exe.linkSystemLibrary("ROOTNTupleDraw6Provider");
-        exe.linkSystemLibrary("ROOTNTupleDraw7Provider");
-        exe.linkSystemLibrary("ROOTNTuple");
-        exe.linkSystemLibrary("ROOTNTupleUtil");
-        exe.linkSystemLibrary("ROOTObjectDraw6Provider");
-        exe.linkSystemLibrary("ROOTObjectDraw7Provider");
-        exe.linkSystemLibrary("ROOTPythonizations");
-        exe.linkSystemLibrary("ROOTQt6WebDisplay");
-        exe.linkSystemLibrary("ROOTTMVASofie");
-        exe.linkSystemLibrary("ROOTTPython");
-        exe.linkSystemLibrary("ROOTTreeViewer");
-        exe.linkSystemLibrary("ROOTVecOps");
-        exe.linkSystemLibrary("ROOTWebDisplay");
-        exe.linkSystemLibrary("RSQLite");
-        exe.linkSystemLibrary("setDict");
-        exe.linkSystemLibrary("Smatrix");
-        exe.linkSystemLibrary("SpectrumPainter");
-        exe.linkSystemLibrary("Spectrum");
-        exe.linkSystemLibrary("SPlot");
-        exe.linkSystemLibrary("SQLIO");
-        exe.linkSystemLibrary("SrvAuth");
-        exe.linkSystemLibrary("Thread");
-        exe.linkSystemLibrary("TMVAGui");
-        exe.linkSystemLibrary("TMVA");
-        exe.linkSystemLibrary("TMVAUtils");
-        exe.linkSystemLibrary("TreePlayer");
-        exe.linkSystemLibrary("Tree");
-        exe.linkSystemLibrary("TreeViewer");
-        exe.linkSystemLibrary("unordered_mapDict");
-        exe.linkSystemLibrary("unordered_multimapDict");
-        exe.linkSystemLibrary("unordered_multisetDict");
-        exe.linkSystemLibrary("unordered_setDict");
-        exe.linkSystemLibrary("Unuran");
-        exe.linkSystemLibrary("valarrayDict");
-        exe.linkSystemLibrary("vectorDict");
-        exe.linkSystemLibrary("WebGui6");
-        exe.linkSystemLibrary("X3d");
-        exe.linkSystemLibrary("XMLIO");
-        exe.linkSystemLibrary("XMLParser");
-        debug.addLibraryPath(std.Build.LazyPath{ .cwd_relative = "/usr/lib/root/" });
-        debug.addLibraryPath(std.Build.LazyPath{ .cwd_relative = "/usr/lib/clang/" });
-        // debug.linkSystemLibrary("Core");
-        // debug.linkSystemLibrary("Imt");
-        // debug.linkSystemLibrary("RIO");
-        // debug.linkSystemLibrary("Net");
-        // debug.linkSystemLibrary("Hist");
-        // debug.linkSystemLibrary("Graf");
-        // debug.linkSystemLibrary("Graf3d");
-        // debug.linkSystemLibrary("Gpad");
-        // debug.linkSystemLibrary("ROOTVecOps");
-        // debug.linkSystemLibrary("Tree");
-        // debug.linkSystemLibrary("TreePlayer");
-        // debug.linkSystemLibrary("Rint");
-        // debug.linkSystemLibrary("Postscript");
-        // debug.linkSystemLibrary("Matrix");
-        // debug.linkSystemLibrary("Physics");
-        // debug.linkSystemLibrary("MathCore");
-        // debug.linkSystemLibrary("Thread");
-        // debug.linkSystemLibrary("ROOTNTuple");
-        // debug.linkSystemLibrary("MultiProc");
-        // debug.linkSystemLibrary("ROOTDataFrame");
-        // debug.linkSystemLibrary("ROOTNTupleUtil");
-        // debug.linkSystemLibrary("Minuit2");
-        // debug.linkSystemLibrary("GenVector");
-        debug.linkSystemLibrary("LLVM");
-        debug.linkSystemLibrary("unwind");
-        debug.linkSystemLibrary("Cling");
-        debug.linkSystemLibrary("pthread");
-        debug.linkSystemLibrary("m");
-        debug.linkSystemLibrary("dl");
-        debug.linkSystemLibrary("ASImageGui");
-        debug.linkSystemLibrary("ASImage");
-        debug.linkSystemLibrary("Cling");
-        debug.linkSystemLibrary("complexDict");
-        debug.linkSystemLibrary("Core");
-        debug.linkSystemLibrary("cppyy_backend");
-        debug.linkSystemLibrary("cppyy");
-        debug.linkSystemLibrary("dequeDict");
-        debug.linkSystemLibrary("EGPythia8");
-        debug.linkSystemLibrary("EG");
-        debug.linkSystemLibrary("Eve");
-        debug.linkSystemLibrary("FFTW");
-        debug.linkSystemLibrary("FitPanel");
-        debug.linkSystemLibrary("FITSIO");
-        debug.linkSystemLibrary("Foam");
-        debug.linkSystemLibrary("forward_listDict");
-        debug.linkSystemLibrary("Fumili");
-        debug.linkSystemLibrary("Gdml");
-        debug.linkSystemLibrary("Ged");
-        debug.linkSystemLibrary("Genetic");
-        debug.linkSystemLibrary("GenVector");
-        debug.linkSystemLibrary("GeomPainter");
-        debug.linkSystemLibrary("Geom");
-        debug.linkSystemLibrary("Gpad");
-        debug.linkSystemLibrary("Graf3d");
-        debug.linkSystemLibrary("Graf");
-        debug.linkSystemLibrary("GuiBld");
-        debug.linkSystemLibrary("GuiHtml");
-        debug.linkSystemLibrary("Gui");
-        debug.linkSystemLibrary("Gviz3d");
-        debug.linkSystemLibrary("Gviz");
-        debug.linkSystemLibrary("GX11");
-        debug.linkSystemLibrary("GX11TTF");
-        debug.linkSystemLibrary("Hbook");
-        debug.linkSystemLibrary("HistFactory");
-        debug.linkSystemLibrary("HistPainter");
-        debug.linkSystemLibrary("Hist");
-        debug.linkSystemLibrary("Imt");
-        debug.linkSystemLibrary("listDict");
-        debug.linkSystemLibrary("map2Dict");
-        debug.linkSystemLibrary("mapDict");
-        debug.linkSystemLibrary("MathCore");
-        debug.linkSystemLibrary("MathMore");
-        debug.linkSystemLibrary("Matrix");
-        debug.linkSystemLibrary("Minuit2");
-        debug.linkSystemLibrary("Minuit");
-        debug.linkSystemLibrary("MLP");
-        debug.linkSystemLibrary("multimap2Dict");
-        debug.linkSystemLibrary("multimapDict");
-        debug.linkSystemLibrary("MultiProc");
-        debug.linkSystemLibrary("multisetDict");
-        debug.linkSystemLibrary("Net");
-        debug.linkSystemLibrary("NetxNG");
-        debug.linkSystemLibrary("New");
-        debug.linkSystemLibrary("PgSQL");
-        debug.linkSystemLibrary("Physics");
-        debug.linkSystemLibrary("Postscript");
-        debug.linkSystemLibrary("PyMVA");
-        debug.linkSystemLibrary("Quadp");
-        debug.linkSystemLibrary("RCsg");
-        debug.linkSystemLibrary("Recorder");
-        debug.linkSystemLibrary("RGL");
-        debug.linkSystemLibrary("RHTTPSniff");
-        debug.linkSystemLibrary("RHTTP");
-        debug.linkSystemLibrary("Rint");
-        debug.linkSystemLibrary("RIO");
-        debug.linkSystemLibrary("RMPI");
-        debug.linkSystemLibrary("RMySQL");
-        debug.linkSystemLibrary("RODBC");
-        debug.linkSystemLibrary("RooBatchCompute_AVX2");
-        debug.linkSystemLibrary("RooBatchCompute_AVX512");
-        debug.linkSystemLibrary("RooBatchCompute_AVX");
-        debug.linkSystemLibrary("RooBatchCompute_CUDA");
-        debug.linkSystemLibrary("RooBatchCompute_GENERIC");
-        debug.linkSystemLibrary("RooBatchCompute");
-        debug.linkSystemLibrary("RooBatchCompute_SSE4.1");
-        debug.linkSystemLibrary("RooFitCodegen");
-        debug.linkSystemLibrary("RooFitCore");
-        debug.linkSystemLibrary("RooFitHS3");
-        debug.linkSystemLibrary("RooFitJSONInterface");
-        debug.linkSystemLibrary("RooFitMore");
-        debug.linkSystemLibrary("RooFit");
-        debug.linkSystemLibrary("RooFitXRooFit");
-        debug.linkSystemLibrary("RooStats");
-        debug.linkSystemLibrary("RootAuth");
-        debug.linkSystemLibrary("ROOTBranchBrowseProvider");
-        debug.linkSystemLibrary("ROOTBrowsable");
-        debug.linkSystemLibrary("ROOTBrowserGeomWidget");
-        debug.linkSystemLibrary("ROOTBrowserRCanvasWidget");
-        debug.linkSystemLibrary("ROOTBrowserTCanvasWidget");
-        debug.linkSystemLibrary("ROOTBrowserTreeWidget");
-        debug.linkSystemLibrary("ROOTBrowserv7");
-        debug.linkSystemLibrary("ROOTBrowserWidgets");
-        debug.linkSystemLibrary("ROOTCanvasPainter");
-        debug.linkSystemLibrary("ROOTDataFrame");
-        debug.linkSystemLibrary("ROOTEve");
-        debug.linkSystemLibrary("ROOTFitPanelv7");
-        debug.linkSystemLibrary("ROOTGeoBrowseProvider");
-        debug.linkSystemLibrary("ROOTGeomViewer");
-        debug.linkSystemLibrary("ROOTGpadv7");
-        debug.linkSystemLibrary("ROOTGraphicsPrimitives");
-        debug.linkSystemLibrary("ROOTLeafDraw6Provider");
-        debug.linkSystemLibrary("ROOTLeafDraw7Provider");
-        debug.linkSystemLibrary("ROOTNTupleBrowseProvider");
-        debug.linkSystemLibrary("ROOTNTupleDraw6Provider");
-        debug.linkSystemLibrary("ROOTNTupleDraw7Provider");
-        debug.linkSystemLibrary("ROOTNTuple");
-        debug.linkSystemLibrary("ROOTNTupleUtil");
-        debug.linkSystemLibrary("ROOTObjectDraw6Provider");
-        debug.linkSystemLibrary("ROOTObjectDraw7Provider");
-        debug.linkSystemLibrary("ROOTPythonizations");
-        debug.linkSystemLibrary("ROOTQt6WebDisplay");
-        debug.linkSystemLibrary("ROOTTMVASofie");
-        debug.linkSystemLibrary("ROOTTPython");
-        debug.linkSystemLibrary("ROOTTreeViewer");
-        debug.linkSystemLibrary("ROOTVecOps");
-        debug.linkSystemLibrary("ROOTWebDisplay");
-        debug.linkSystemLibrary("RSQLite");
-        debug.linkSystemLibrary("setDict");
-        debug.linkSystemLibrary("Smatrix");
-        debug.linkSystemLibrary("SpectrumPainter");
-        debug.linkSystemLibrary("Spectrum");
-        debug.linkSystemLibrary("SPlot");
-        debug.linkSystemLibrary("SQLIO");
-        debug.linkSystemLibrary("SrvAuth");
-        debug.linkSystemLibrary("Thread");
-        debug.linkSystemLibrary("TMVAGui");
-        debug.linkSystemLibrary("TMVA");
-        debug.linkSystemLibrary("TMVAUtils");
-        debug.linkSystemLibrary("TreePlayer");
-        debug.linkSystemLibrary("Tree");
-        debug.linkSystemLibrary("TreeViewer");
-        debug.linkSystemLibrary("unordered_mapDict");
-        debug.linkSystemLibrary("unordered_multimapDict");
-        debug.linkSystemLibrary("unordered_multisetDict");
-        debug.linkSystemLibrary("unordered_setDict");
-        debug.linkSystemLibrary("Unuran");
-        debug.linkSystemLibrary("valarrayDict");
-        debug.linkSystemLibrary("vectorDict");
-        debug.linkSystemLibrary("WebGui6");
-        debug.linkSystemLibrary("X3d");
-        debug.linkSystemLibrary("XMLIO");
-        debug.linkSystemLibrary("XMLParser");
+        exe.root_module.addLibraryPath(b.path("lib/"));
+        // exe.root_module.linkSystemLibrary("example_dynamic", .{});
+        debug.root_module.addLibraryPath(b.path("lib/"));
+        // debug.root_module.linkSystemLibrary("example_dynamic", .{});
+        exe.root_module.linkSystemLibrary("stdc++", .{});
+        exe.root_module.linkSystemLibrary("Core", .{});
+        exe.root_module.linkSystemLibrary("Imt", .{});
+        exe.root_module.linkSystemLibrary("RIO", .{});
+        exe.root_module.linkSystemLibrary("Net", .{});
+        exe.root_module.linkSystemLibrary("Hist", .{});
+        exe.root_module.linkSystemLibrary("Graf", .{});
+        exe.root_module.linkSystemLibrary("Graf3d", .{});
+        exe.root_module.linkSystemLibrary("Gpad", .{});
+        exe.root_module.linkSystemLibrary("ROOTVecOps", .{});
+        exe.root_module.linkSystemLibrary("Tree", .{});
+        exe.root_module.linkSystemLibrary("TreePlayer", .{});
+        exe.root_module.linkSystemLibrary("Rint", .{});
+        exe.root_module.linkSystemLibrary("Postscript", .{});
+        exe.root_module.linkSystemLibrary("Matrix", .{});
+        exe.root_module.linkSystemLibrary("Physics", .{});
+        exe.root_module.linkSystemLibrary("MathCore", .{});
+        exe.root_module.linkSystemLibrary("Thread", .{});
+        exe.root_module.linkSystemLibrary("ROOTNTuple", .{});
+        exe.root_module.linkSystemLibrary("MultiProc", .{});
+        exe.root_module.linkSystemLibrary("ROOTDataFrame", .{});
+        exe.root_module.linkSystemLibrary("ROOTNTupleUtil", .{});
+        exe.root_module.linkSystemLibrary("pthread", .{});
+        exe.root_module.linkSystemLibrary("m", .{});
+        exe.root_module.linkSystemLibrary("dl", .{});
     }
     //-------------------------------------------------------------------------
 
     // Build and/or Link Static library --------------------------------------
     const static_option = b.option(bool, "build-static", "builds the static.a file") orelse false;
     if (static_option) {
-        // const static_lib = createStaticLib(b, optimize, target);
-        // exe.linkLibrary(static_lib);
-        // debug.linkLibrary(static_lib);
+        const static_lib = createCLib(b, .{
+            .name = "example_static",
+            .dir_path = "lib/example-static-lib/",
+            .optimize = optimize,
+            .target = target,
+            .language = .c,
+            .linkage = .static,
+        });
+        exe.linkLibrary(static_lib);
+        debug.linkLibrary(static_lib);
         // zig_lib.linkLibrary(static_lib);
-        // b.installArtifact(static_lib);
+        b.installArtifact(static_lib);
     } else {
-        //     exe.addLibraryPath(b.path("lib/"));
-        //     exe.linkSystemLibrary("example_static");
-        //     debug.addLibraryPath(b.path("lib/"));
-        //     debug.linkSystemLibrary("example_static");
+        exe.addLibraryPath(b.path("lib/"));
+        exe.linkSystemLibrary("clangCppInterOp");
+        // exe.linkSystemLibrary("example_static");
+        debug.addLibraryPath(b.path("lib/"));
+        // debug.linkSystemLibrary("example_static");
     }
     //-------------------------------------------------------------------------
 
@@ -562,9 +250,11 @@ fn getClangPath(alloc: std.mem.Allocator, target: std.Target) ![]const u8 {
 
     try child_proc.spawn();
 
-    const child_std_out = child_proc.stdout.?;
+    const reader_buff: []u8 = try alloc.alloc(u8, 512);
+    var child_stdout_reader = child_proc.stdout.?.reader(reader_buff);
+    const child_stdout = &child_stdout_reader.interface;
 
-    var output = try child_std_out.reader().readAllAlloc(alloc, 512);
+    var output = try child_stdout.takeDelimiterExclusive('\n');
 
     _ = try child_proc.wait();
 
@@ -630,55 +320,39 @@ fn getBuildFlags(
     return cpp_flags;
 }
 
-// / Creates the example dynamic library. Not required if not using project example libaries
-// fn createDynamicLib(
-//     b: *Build,
-//     optimize: std.builtin.OptimizeMode,
-//     target: Build.ResolvedTarget,
-// ) *Build.Step.Compile {
-//     var dynamic_lib = b.addSharedLibrary(.{
-//         .name = "example_dynamic",
-//         .optimize = optimize,
-//         .target = target,
-//     });
-//
-//     dynamic_lib.addCSourceFiles(
-//         getCSrcFiles(
-//             b.allocator,
-//             .{
-//                 .dir_path = "./lib/example-dynamic-lib/",
-//                 .language = .cpp,
-//             },
-//         ) catch |err|
-//             @panic(@errorName(err)),
-//     );
-//
-//     dynamic_lib.addIncludePath(b.path("include/"));
-//     dynamic_lib.linkLibCpp();
-//     return dynamic_lib;
-// }
+/// Creates a C library.
+fn createCLib(
+    b: *Build,
+    lib_options: struct {
+        name: []const u8,
+        dir_path: []const u8,
+        language: CSourceLanguage,
+        include_path: []const u8 = "include/",
+        linkage: builtin.LinkMode,
+        optimize: builtin.OptimizeMode,
+        target: Build.ResolvedTarget,
+    },
+) *Build.Step.Compile {
+    var lib = b.addLibrary(.{
+        .name = lib_options.name,
+        .root_module = b.createModule(.{
+            .optimize = lib_options.optimize,
+            .target = lib_options.target,
+            .link_libc = lib_options.language == .c,
+            .link_libcpp = lib_options.language == .cpp,
+        }),
+        .linkage = lib_options.linkage,
+    });
 
-// / Creates the example static library. Not required if not using project example libaries
-// fn createStaticLib(
-//     b: *Build,
-//     optimize: std.builtin.OptimizeMode,
-//     target: Build.ResolvedTarget,
-// ) *Build.Step.Compile {
-//     var dynamic_lib = b.addStaticLibrary(.{
-//         .name = "example_static",
-//         .optimize = optimize,
-//         .target = target,
-//     });
-//
-//     dynamic_lib.addCSourceFiles(
-//         getCSrcFiles(b.allocator, .{
-//             .dir_path = "./lib/example-static-lib/",
-//             .language = .c,
-//         }) catch |err|
-//             @panic(@errorName(err)),
-//     );
-//
-//     dynamic_lib.addIncludePath(b.path("include/"));
-//     dynamic_lib.linkLibC();
-//     return dynamic_lib;
-// }
+    lib.addCSourceFiles(
+        getCSrcFiles(b.allocator, .{
+            .dir_path = lib_options.dir_path,
+            .language = lib_options.language,
+        }) catch |err|
+            @panic(@errorName(err)),
+    );
+
+    lib.addIncludePath(b.path(lib_options.include_path));
+
+    return lib;
+}
